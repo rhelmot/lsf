@@ -43,6 +43,9 @@ func pipe2Handler(sc *tracer.SyscallCtx) error {
 func fcntlHander(sc *tracer.SyscallCtx) error {
 	if sc.Entry {
 		origCmd := sc.Regs.Arg(1)
+		if origCmd == freebsd.F_ISUNIONSTACK {
+			return literalHandler(0)(sc)
+		}
 		hostCmd, ok := freebsd.FcntlCmdMapping[origCmd]
 		if !ok {
 			return fmt.Errorf("Bad fcntl cmd: %d", origCmd)

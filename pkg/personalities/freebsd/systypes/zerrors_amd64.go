@@ -686,6 +686,7 @@ const (
 	F_UNLCK                        = 0x2
 	F_UNLCKSYS                     = 0x4
 	F_WRLCK                        = 0x3
+	F_ISUNIONSTACK                 = 21
 	HUPCL                          = 0x4000
 	HW_MACHINE                     = 1
 	HW_MODEL                       = 2
