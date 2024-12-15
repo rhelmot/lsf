@@ -1,6 +1,8 @@
 package freebsd
 
 import (
+	"fmt"
+	"syscall"
 	freebsd "github.com/AkihiroSuda/lsf/pkg/personalities/freebsd/systypes"
 	"github.com/AkihiroSuda/lsf/pkg/tracer"
 	"github.com/sirupsen/logrus"
@@ -38,47 +40,81 @@ func pipe2Handler(sc *tracer.SyscallCtx) error {
 	return simpleHandler(unix.SYS_PIPE2)(sc)
 }
 
-func openFlagsToFreeBSD(origFlags uint64) uint64 {
-	var flags uint64
-	m := map[uint64]uint64{
-		// O_ACCMODE: N/A
-		freebsd.O_APPEND:    unix.O_APPEND,
-		freebsd.O_ASYNC:     unix.O_ASYNC,
-		freebsd.O_CLOEXEC:   unix.O_CLOEXEC,
-		freebsd.O_CREAT:     unix.O_CREAT,
-		freebsd.O_DIRECT:    unix.O_DIRECT,
-		freebsd.O_DIRECTORY: unix.O_DIRECTORY,
-		freebsd.O_EXCL:      unix.O_EXCL,
-		// O_EXEC: N/A
-		// O_EXLOCK: N/A
-		freebsd.O_FSYNC:    unix.O_FSYNC,
-		freebsd.O_NDELAY:   unix.O_NDELAY,
-		freebsd.O_NOCTTY:   unix.O_NOCTTY,
-		freebsd.O_NOFOLLOW: unix.O_NOFOLLOW,
-		// O_NONBLOCK: an alias of O_NDELAY
-		freebsd.O_RDONLY: unix.O_RDONLY,
-		freebsd.O_RDWR:   unix.O_RDWR,
-		// O_RESOLVE_BENEATH: N/A
-		// O_SEARCH: N/A
-		// O_SHLOCK: N/A
-		// O_SYNC: an alias of O_FSYNC
-		freebsd.O_TRUNC: unix.O_TRUNC,
-		// O_TTY_INIT: N/A
-		// O_VERIFY: N/A
-		freebsd.O_WRONLY: unix.O_WRONLY,
+func fcntlHander(sc *tracer.SyscallCtx) error {
+	if sc.Entry {
+		origCmd := sc.Regs.Arg(1)
+		hostCmd, ok := freebsd.FcntlCmdMapping[origCmd]
+		if !ok {
+			return fmt.Errorf("Bad fcntl cmd: %d", origCmd)
+		}
+		sc.Regs.SetArg(1, hostCmd)
+
+		switch hostCmd {
+		case syscall.F_SETFD:
+			sc.Regs.SetArg(2, convertFlagsAndWarn(sc.Regs.Arg(2), freebsd.FcntlFdFlagsMapping, "fcntl(F_SETFD)"))
+		case syscall.F_SETFL:
+			sc.Regs.SetArg(2, convertFlagsAndWarn(sc.Regs.Arg(2), freebsd.OpenFlagsMapping, "fcntl(F_SETFL)"))
+		}
+	} else {
+		hostCmd := sc.Regs.Arg(0)
+		switch hostCmd {
+		case syscall.F_GETFD:
+			sc.Regs.SetArg(2, convertFlagsReverseAndWarn(sc.Regs.Arg(2), freebsd.FcntlFdFlagsMapping, "fcntl(F_GETFD)"))
+		case syscall.F_GETFL:
+			sc.Regs.SetArg(2, convertFlagsReverseAndWarn(sc.Regs.Arg(2), freebsd.OpenFlagsMapping, "fcntl(F_SETFL)"))
+		}
 	}
-	for k, v := range m {
-		if origFlags&k != 0 {
-			flags |= v
+	return simpleHandler(unix.SYS_FCNTL)(sc)
+}
+
+func convertFlags(origFlags uint64, bitMapping map[uint64]uint64) (uint64, uint64) {
+	var newFlags uint64
+	for k, v := range bitMapping {
+		if origFlags & k != 0 {
+			newFlags |= v
 			origFlags &= ^k
 		}
 	}
-	if origFlags&freebsd.O_VERIFY != 0 {
-		logrus.Debugf("SYS_OPEN*: ignoring O_VERIFY")
-		origFlags &= ^uint64(freebsd.O_VERIFY)
+
+	return newFlags, origFlags
+}
+
+func convertFlagsReverse(origFlags uint64, bitMapping map[uint64]uint64) (uint64, uint64) {
+	var newFlags uint64
+	for k, v := range bitMapping {
+		if origFlags & v != 0 {
+			newFlags |= k
+			origFlags &= ^v
+		}
 	}
-	if origFlags != 0 {
-		logrus.Debugf("SYS_OPEN*: ignoring unsupported flags 0x%x", origFlags)
+
+	return newFlags, origFlags
+}
+
+func convertFlagsAndWarn(origFlags uint64, bitMapping map[uint64]uint64, errCtx string) uint64 {
+	flags, remainder := convertFlags(origFlags, bitMapping)
+	if remainder != 0 {
+		logrus.Debug("%s: ignoring unsupported flags 0x%x", errCtx, remainder)
+	}
+	return flags
+}
+
+func convertFlagsReverseAndWarn(origFlags uint64, bitMapping map[uint64]uint64, errCtx string) uint64 {
+	flags, remainder := convertFlagsReverse(origFlags, bitMapping)
+	if remainder != 0 {
+		logrus.Debug("%s: ignoring unsupported flags 0x%x", errCtx, remainder)
+	}
+	return flags
+}
+
+func openFlagsToFreeBSD(origFlags uint64) uint64 {
+	flags, remainder := convertFlags(origFlags, freebsd.OpenFlagsMapping)
+	if remainder & freebsd.O_VERIFY != 0 {
+		logrus.Debugf("SYS_OPEN*: ignoring O_VERIFY")
+		remainder &= ^uint64(freebsd.O_VERIFY)
+	}
+	if remainder != 0 {
+		logrus.Debugf("SYS_OPEN*: ignoring unsupported flags 0x%x", remainder)
 	}
 	return flags
 }

@@ -158,6 +158,7 @@ var syscallHandlers = map[uint64]tracer.SyscallHandler{
 		syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlimit)
 		return literalHandler(rlimit.Max)(sc)
 	},
+	freebsd.SYS_FCNTL: fcntlHander,
 	//================================================== 100 ==================================================
 	freebsd.SYS_GETPRIORITY:  simpleHandler(unix.SYS_GETPRIORITY),
 	freebsd.SYS_LISTEN:       simpleHandler(unix.SYS_LISTEN),
