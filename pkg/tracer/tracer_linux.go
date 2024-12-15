@@ -116,6 +116,7 @@ func (tracer *Tracer) Trace() error {
 			logrus.Debugf("VFORK")
 		case uint32(unix.SIGTRAP) | (unix.PTRACE_EVENT_EXEC << 8):
 			logrus.Debugf("EXEC")
+			sc.Entry = false;
 			if err := unix.PtraceSingleStep(wPid); err != nil {
 				return err
 			}

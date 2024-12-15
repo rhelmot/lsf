@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"time"
+	"syscall"
 
 	freebsd "github.com/AkihiroSuda/lsf/pkg/personalities/freebsd/systypes"
 	"github.com/AkihiroSuda/lsf/pkg/tracer"
@@ -59,6 +60,18 @@ func stubHandler(errno freebsd.Errno, comments ...string) tracer.SyscallHandler 
 		} else {
 			ret := -1 * int(errno)
 			sc.Regs.SetRet(uint64(ret))
+		}
+		return nil
+	}
+}
+
+func literalHandler(result uint64, comments ...string) tracer.SyscallHandler {
+	return func(sc *tracer.SyscallCtx) error {
+		if sc.Entry {
+			logrus.Debugf("Stub syscall %d %s (result %d) %v", sc.Num, freebsd.SysNames[sc.Num], result, comments)
+			sc.Regs.SetSyscall(nopSyscall)
+		} else {
+			sc.Regs.SetRet(result)
 		}
 		return nil
 	}
@@ -140,6 +153,11 @@ var syscallHandlers = map[uint64]tracer.SyscallHandler{
 	freebsd.SYS_GETPGID:   simpleHandler(unix.SYS_GETPGID),
 	freebsd.SYS_DUP2:      simpleHandler(freebsd.SYS_DUP2),
 	freebsd.SYS_FSYNC:     simpleHandler(unix.SYS_FSYNC),
+	freebsd.SYS_GETDTABLESIZE: func(sc *tracer.SyscallCtx) error {
+		rlimit := syscall.Rlimit {}
+		syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlimit)
+		return literalHandler(rlimit.Max)(sc)
+	},
 	//================================================== 100 ==================================================
 	freebsd.SYS_GETPRIORITY:  simpleHandler(unix.SYS_GETPRIORITY),
 	freebsd.SYS_LISTEN:       simpleHandler(unix.SYS_LISTEN),
@@ -160,6 +178,8 @@ var syscallHandlers = map[uint64]tracer.SyscallHandler{
 	freebsd.SYS_SETSID:  simpleHandler(unix.SYS_SETSID),
 	freebsd.SYS_SYSARCH: sysarchHandler,
 	// SYS_SETE{U,G}ID: N/A
+	freebsd.SYS_GETRLIMIT: rlimitHandler(unix.SYS_GETRLIMIT),
+	freebsd.SYS_SETRLIMIT: rlimitHandler(unix.SYS_SETRLIMIT),
 	//================================================== 200 ==================================================
 	freebsd.SYS___SYSCTL:      sysctlHandler,
 	freebsd.SYS_CLOCK_GETTIME: simpleHandler(unix.SYS_CLOCK_GETTIME),
@@ -220,4 +240,5 @@ var syscallHandlers = map[uint64]tracer.SyscallHandler{
 	freebsd.SYS_FSTAT:         fstatHandler,
 	freebsd.SYS_FSTATAT:       fstatatHandler,
 	freebsd.SYS_GETDIRENTRIES: getdirentriesHandler,
+	freebsd.SYS___SYSCTLBYNAME: sysctlbynameHandler,
 }

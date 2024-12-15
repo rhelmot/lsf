@@ -60,7 +60,7 @@ func ReadTlsTemplate(pid int) (*TlsTemplate, error) {
 }
 
 func PeekAuxv(pid int, stackPtr uintptr) ([]Elf64_auxv_t, uintptr, error) {
-	stackDumpSize := 1024
+	stackDumpSize := 2048
 	stackDump := make([]byte, stackDumpSize)
 	if _, err := unix.PtracePeekData(pid, stackPtr, stackDump); err != nil {
 		return nil, 0, fmt.Errorf("failed to dump stack 0x%x (size=%d, pid=%d): %w", stackPtr, stackDumpSize, pid, err)

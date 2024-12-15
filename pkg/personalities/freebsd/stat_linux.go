@@ -76,7 +76,7 @@ func fstatatHandler(sc *tracer.SyscallCtx) error {
 				return nil
 			}
 		}
-		const pathnameLen = 32 // FIXME: how to predict the len?
+		const pathnameLen = 256 // FIXME: how to predict the len?
 		pathname, err := procutil.ReadString(sc.Pid, uintptr(sc.Regs.Arg(1)), pathnameLen)
 		if err != nil {
 			return fmt.Errorf("failed to read pathname: %w", err)

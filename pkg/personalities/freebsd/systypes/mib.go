@@ -19,17 +19,46 @@ const (
 	CTL_SYSCTL_NEXT     = 2
 	CTL_SYSCTL_NAME2OID = 3
 
-	// KERN_OSTYPE     = 1  is defined in zerrors_*.go
-	// KERN_OSRELEASE  = 2  is defined in zerrors_*.go
-	KERN_OSREV = 3
-	// KERN_VERSION    = 4  is defined in zerrors_*.go
-	// KERN_HOSTNAME   = 10 is defined in zerors_*.go
-	KERN_PROC       = 14
+	KERN_OSTYPE                    = 1
+	KERN_OSRELEASE                 = 2
+	KERN_OSREV                     = 3
+	KERN_VERSION                   = 4
+	KERN_MAXVNODES                 = 5
+	KERN_MAXPROC                   = 6
+	KERN_MAXFILES                  = 7
+	KERN_ARGMAX                    = 8
+	KERN_SECURELVL                 = 9
+	KERN_HOSTNAME                  = 10
+	KERN_HOSTID                    = 11
+	KERN_CLOCKRATE                 = 12
+	KERN_VNODE                     = 13
+	KERN_PROC                      = 14
+	KERN_FILE                      = 15
+	KERN_PROF                      = 16
+	KERN_POSIX1                    = 17
+	KERN_NGROUPS                   = 18
+	KERN_JOB_CONTROL               = 19
+	KERN_SAVED_IDS                 = 20
+	KERN_BOOTTIME                  = 21
+	KERN_NISDOMAINNAME             = 22
+	KERN_UPDATEINTERVAL            = 23
+	KERN_OSRELDATE                 = 24
+	KERN_NTP_PLL                   = 25
+	KERN_BOOTFILE                  = 26
+	KERN_MAXFILESPERPROC           = 27
+	KERN_MAXPROCPERUID             = 28
+	KERN_DUMPDEV                   = 29
+	KERN_IPC                       = 30
+	KERN_DUMMY                     = 31
+	KERN_PS_STRINGS                = 32
+	KERN_USRSTACK                  = 33
+	KERN_LOGSIGEXIT                = 34
+	KERN_IOV_MAX                   = 35
+	KERN_HOSTUUID                  = 36
+	KERN_ARND                      = 37
+	KERN_MAXPHYS                   = 38
+	KERN_LOCKF                     = 39
 	KERN_PROC_OSREL = 40
-
-	KERN_OSRELDATE = 24
-	KERN_ARND      = 37
-	KERN_MAXPHYS   = 38
 
 	VM_OVERCOMMIT = 12
 
@@ -64,12 +93,15 @@ func MibString(mib []uint32) string {
 			KERN_OSRELDATE: "osreldate",
 			KERN_ARND:      "arnd",
 			KERN_MAXPHYS:   "maxphys",
+			KERN_USRSTACK:  "usrstack",
 		},
 		CTL_VM: map[int]string{
 			VM_OVERCOMMIT: "overcommit",
 		},
 		CTL_HW: map[int]string{
 			HW_MACHINE: "machine",
+			HW_PAGESIZE: "pagesizes",
+			HW_NCPU: "ncpu",
 		},
 	}
 	m2 := map[int]map[int]map[int]string{

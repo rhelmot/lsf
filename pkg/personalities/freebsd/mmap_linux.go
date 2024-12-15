@@ -25,6 +25,10 @@ func mmapHandler(sc *tracer.SyscallCtx) error {
 			freebsd.MAP_SHARED:        unix.MAP_SHARED,
 			freebsd.MAP_STACK:         unix.MAP_STACK,
 		}
+		if origFlags == freebsd.MAP_ANON {
+			logrus.Debugf("SYS_MMAP: handling libc startup edge case for, uh, the other side of the stack guard?");
+			origFlags |= freebsd.MAP_PRIVATE;
+		}
 		for k, v := range m {
 			if origFlags&k != 0 {
 				flags |= v
