@@ -29,6 +29,15 @@ func openatHandler(sc *tracer.SyscallCtx) error {
 	return simpleHandler(unix.SYS_OPENAT)(sc)
 }
 
+func pipe2Handler(sc *tracer.SyscallCtx) error {
+	if sc.Entry {
+		origFlags := sc.Regs.Arg(2)
+		flags := openFlagsToFreeBSD(origFlags)
+		sc.Regs.SetArg(2, flags)
+	}
+	return simpleHandler(unix.SYS_PIPE2)(sc)
+}
+
 func openFlagsToFreeBSD(origFlags uint64) uint64 {
 	var flags uint64
 	m := map[uint64]uint64{

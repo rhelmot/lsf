@@ -45,7 +45,7 @@ type SyscallCtx struct {
 type SyscallHandler func(sc *SyscallCtx) error
 
 func (tracer *Tracer) Trace() error {
-	sc := &SyscallCtx{
+	scRoot := &SyscallCtx{
 		Personality: tracer.personality,
 	}
 	runtime.LockOSThread()
@@ -67,6 +67,7 @@ func (tracer *Tracer) Trace() error {
 		return fmt.Errorf("birthcry: expected SIGTRAP, got %+v", sig)
 	}
 	logrus.Debugf("Got birthcry, pid=%d", wPid)
+	scRoot.Pid = wPid
 
 	// Set up the ptrace options
 	// PTRACE_O_EXITKILL: since Linux 3.8
@@ -81,16 +82,19 @@ func (tracer *Tracer) Trace() error {
 		return fmt.Errorf("failed to set ptrace options: %w", err)
 	}
 
-	if err = unix.PtraceGetRegs(wPid, &sc.Regs.PtraceRegs); err != nil {
+	if err = unix.PtraceGetRegs(wPid, &scRoot.Regs.PtraceRegs); err != nil {
 		return fmt.Errorf("failed to read registers for %d: %w", wPid, err)
 	}
-	if err = tracer.personality.InitNewProc(wPid, &sc.Regs); err != nil {
+	if err = tracer.personality.InitNewProc(wPid, &scRoot.Regs); err != nil {
 		return err
 	}
-	if err = unix.PtraceSetRegs(wPid, &sc.Regs.PtraceRegs); err != nil {
+	if err = unix.PtraceSetRegs(wPid, &scRoot.Regs.PtraceRegs); err != nil {
 		return fmt.Errorf("failed to set registers for %d: %w", wPid, err)
 	}
 	logrus.Debugf("Starting loop")
+	scMap := map[int]*SyscallCtx {
+		wPid: scRoot,
+	}
 	if err := unix.PtraceSyscall(wPid, 0); err != nil {
 		return fmt.Errorf("failed to call PTRACE_SYSCALL (pid=%d) %w", wPid, err)
 	}
@@ -99,6 +103,11 @@ func (tracer *Tracer) Trace() error {
 		wPid, err = unix.Wait4(-1*pGid, &ws, unix.WALL, nil)
 		if err != nil {
 			return err
+		}
+		sc, ok := scMap[wPid]
+		if !ok {
+			logrus.Errorf("Got ptrace event from unknown process %d", wPid)
+			continue
 		}
 		switch uint32(ws) >> 8 {
 		case uint32(unix.SIGTRAP) | (unix.PTRACE_EVENT_CLONE << 8):
@@ -109,8 +118,12 @@ func (tracer *Tracer) Trace() error {
 			if err != nil {
 				return err
 			}
-			if err := unix.PtraceSetOptions(int(forkPid), ptraceOptions); err != nil {
-				logrus.Debugf("failed to set ptrace options for a forked process %d: %v", forkPid, err)
+			//if err := unix.PtraceSetOptions(int(forkPid), ptraceOptions); err != nil {
+			//	logrus.Debugf("failed to set ptrace options for a forked process %d: %v", forkPid, err)
+			//}
+			scMap[int(forkPid)] = &SyscallCtx{
+				Personality: tracer.personality,
+				Pid: int(forkPid),
 			}
 		case uint32(unix.SIGTRAP) | (unix.PTRACE_EVENT_VFORK << 8):
 			logrus.Debugf("VFORK")
@@ -149,6 +162,7 @@ func (tracer *Tracer) Trace() error {
 			if err := unix.PtraceDetach(wPid); err != nil {
 				logrus.Debugf("ptrace_detach: %v", err)
 			}
+			delete(scMap, wPid)
 			continue
 		case ws.Stopped():
 			sig := ws.StopSignal()
@@ -158,7 +172,6 @@ func (tracer *Tracer) Trace() error {
 				if err = unix.PtraceGetRegs(wPid, &sc.Regs.PtraceRegs); err != nil {
 					return fmt.Errorf("failed to read registers for %d: %w", wPid, err)
 				}
-				sc.Pid = wPid
 				sc.Entry = !sc.Entry
 				if sc.Entry {
 					sc.Num = sc.Regs.Syscall()

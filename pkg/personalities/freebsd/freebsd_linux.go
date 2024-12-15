@@ -151,7 +151,7 @@ var syscallHandlers = map[uint64]tracer.SyscallHandler{
 	freebsd.SYS_SETGROUPS: simpleHandler(unix.SYS_SETGROUPS),
 	freebsd.SYS_GETPGRP:   simpleHandler(unix.SYS_GETPGRP),
 	freebsd.SYS_GETPGID:   simpleHandler(unix.SYS_GETPGID),
-	freebsd.SYS_DUP2:      simpleHandler(freebsd.SYS_DUP2),
+	freebsd.SYS_DUP2:      simpleHandler(unix.SYS_DUP2),
 	freebsd.SYS_FSYNC:     simpleHandler(unix.SYS_FSYNC),
 	freebsd.SYS_GETDTABLESIZE: func(sc *tracer.SyscallCtx) error {
 		rlimit := syscall.Rlimit {}
@@ -241,4 +241,5 @@ var syscallHandlers = map[uint64]tracer.SyscallHandler{
 	freebsd.SYS_FSTATAT:       fstatatHandler,
 	freebsd.SYS_GETDIRENTRIES: getdirentriesHandler,
 	freebsd.SYS___SYSCTLBYNAME: sysctlbynameHandler,
+	freebsd.SYS_PIPE2: pipe2Handler,
 }

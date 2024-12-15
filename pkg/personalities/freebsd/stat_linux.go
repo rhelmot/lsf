@@ -22,7 +22,9 @@ func fstatHandler(sc *tracer.SyscallCtx) error {
 		fdNum := int32(sc.Regs.Arg(0))
 		fd, err := procutil.GetFd(sc.Pid, int(fdNum))
 		if err != nil {
-			return err
+			e := -1 * int(freebsd.EBADF)
+			sc.Regs.SetErrno(uint64(e));
+			return nil
 		}
 		defer unix.Close(fd)
 		var st unix.Stat_t
@@ -56,7 +58,9 @@ func fstatatHandler(sc *tracer.SyscallCtx) error {
 		if dirfdNum >= 0 {
 			dirfd, err = procutil.GetFd(sc.Pid, int(dirfdNum))
 			if err != nil {
-				return err
+				e := -1 * int(freebsd.EBADF)
+				sc.Regs.SetErrno(uint64(e));
+				return nil
 			}
 			defer unix.Close(dirfd)
 		} else {
