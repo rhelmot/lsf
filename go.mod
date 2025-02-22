@@ -9,6 +9,8 @@ require (
 	gotest.tools/v3 v3.3.0
 )
 
+require github.com/lunixbochs/struc v0.0.0-20241101090106-8d528fa2c543 // indirect
+
 require (
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
