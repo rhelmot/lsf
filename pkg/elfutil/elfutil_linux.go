@@ -60,7 +60,16 @@ func ReadTlsTemplate(pid int) (*TlsTemplate, error) {
 }
 
 func PeekAuxv(pid int, stackPtr uintptr) ([]Elf64_auxv_t, uintptr, error) {
-	stackDumpSize := 1024*16
+	// discover max dumpable size. this can obviously be optimized
+	stackDumpSize := 0x1000 - stackPtr % 0x1000
+	for {
+		stackDump := make([]byte, stackDumpSize)
+		if _, err := unix.PtracePeekData(pid, stackPtr, stackDump); err != nil {
+			stackDumpSize -= 0x1000
+			break
+		}
+		stackDumpSize += 0x1000
+	}
 	stackDump := make([]byte, stackDumpSize)
 	if _, err := unix.PtracePeekData(pid, stackPtr, stackDump); err != nil {
 		return nil, 0, fmt.Errorf("failed to dump stack 0x%x (size=%d, pid=%d): %w", stackPtr, stackDumpSize, pid, err)
@@ -74,7 +83,7 @@ func PeekAuxv(pid int, stackPtr uintptr) ([]Elf64_auxv_t, uintptr, error) {
 		// logrus.Debugf("envptr 0x%x", envPtr)
 		idx += 8
 		if idx > len(stackDump)-1 {
-			return nil, 0, fmt.Errorf("stack[0x%x]: too many envs?", idx)
+			return nil, 0, fmt.Errorf("stack[0x%x]: ran off the end; malformed?", idx)
 		}
 		if envPtr == 0 {
 			break
