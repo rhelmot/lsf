@@ -233,6 +233,10 @@ var syscallHandlers = map[uint64]tracer.SyscallHandler{
 	freebsd.SYS_TRUNCATE:  simpleHandler(unix.SYS_TRUNCATE),
 	freebsd.SYS_FTRUNCATE: simpleHandler(unix.SYS_FTRUNCATE),
 	freebsd.SYS_OPENAT:    openatHandler,
+	freebsd.SYS_GETCONTEXT: getcontextHandler,
+	freebsd.SYS_SETCONTEXT: setcontextHandler,
+	freebsd.SYS__UMTX_OP: umtxopHandler,
+	freebsd.SYS_RTPRIO_THREAD: literalHandler(0),  // TODO
 	//================================================== 500 ==================================================
 	freebsd.SYS_READLINKAT:    simpleHandler(unix.SYS_READLINKAT),
 	freebsd.SYS_RENAMEAT:      simpleHandler(unix.SYS_RENAMEAT),

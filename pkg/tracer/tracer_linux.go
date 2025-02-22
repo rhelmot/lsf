@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"syscall"
 
 	"github.com/AkihiroSuda/lsf/pkg/procutil"
 	"github.com/sirupsen/logrus"
@@ -26,7 +27,7 @@ func New(personality Personality, args []string) (*Tracer, error) {
 
 type Personality interface {
 	HandleSyscall(sc *SyscallCtx) error
-	InitNewProc(wPid int, regs *Regs) error
+	InitNewProc(wPid int, regs *Regs) (error)
 }
 
 type Tracer struct {
@@ -40,6 +41,8 @@ type SyscallCtx struct {
 	Entry       bool
 	Num         uint64
 	Regs        Regs
+	OldRegs     Regs
+	Scratch     uint64
 }
 
 type SyscallHandler func(sc *SyscallCtx) error
@@ -85,6 +88,9 @@ func (tracer *Tracer) Trace() error {
 	if err = unix.PtraceGetRegs(wPid, &scRoot.Regs.PtraceRegs); err != nil {
 		return fmt.Errorf("failed to read registers for %d: %w", wPid, err)
 	}
+	if scRoot.Scratch, err = AllocScratch(wPid, &scRoot.Regs, 0x1000); err != nil {
+		return err
+	}
 	if err = tracer.personality.InitNewProc(wPid, &scRoot.Regs); err != nil {
 		return err
 	}
@@ -111,13 +117,24 @@ func (tracer *Tracer) Trace() error {
 		}
 		switch uint32(ws) >> 8 {
 		case uint32(unix.SIGTRAP) | (unix.PTRACE_EVENT_CLONE << 8):
-			logrus.Debugf("CLONE")
-		case uint32(unix.SIGTRAP) | (unix.PTRACE_EVENT_FORK << 8):
-			logrus.Debugf("FORK")
 			forkPid, err := unix.PtraceGetEventMsg(wPid)
 			if err != nil {
 				return err
 			}
+			logrus.Debugf("CLONE %d -> %d", wPid, forkPid)
+			//if err := unix.PtraceSetOptions(int(forkPid), ptraceOptions); err != nil {
+			//	logrus.Debugf("failed to set ptrace options for a forked process %d: %v", forkPid, err)
+			//}
+			scMap[int(forkPid)] = &SyscallCtx{
+				Personality: tracer.personality,
+				Pid: int(forkPid),
+			}
+		case uint32(unix.SIGTRAP) | (unix.PTRACE_EVENT_FORK << 8):
+			forkPid, err := unix.PtraceGetEventMsg(wPid)
+			if err != nil {
+				return err
+			}
+			logrus.Debugf("FORK %d -> %d", wPid, forkPid)
 			//if err := unix.PtraceSetOptions(int(forkPid), ptraceOptions); err != nil {
 			//	logrus.Debugf("failed to set ptrace options for a forked process %d: %v", forkPid, err)
 			//}
@@ -140,6 +157,9 @@ func (tracer *Tracer) Trace() error {
 			if err = unix.PtraceGetRegs(wPid, &sc.Regs.PtraceRegs); err != nil {
 				return fmt.Errorf("failed to read registers for %d: %w", wPid, err)
 			}
+			if sc.Scratch, err = AllocScratch(wPid, &sc.Regs, 0x1000); err != nil {
+				return err
+			}
 			if err = tracer.personality.InitNewProc(wPid, &sc.Regs); err != nil {
 				return err
 			}
@@ -150,51 +170,91 @@ func (tracer *Tracer) Trace() error {
 				return fmt.Errorf("failed to call PTRACE_SYSCALL (pid=%d) %w", wPid, err)
 			}
 			continue
-		}
-		switch {
-		case ws.Exited():
-			exitStatus := ws.ExitStatus()
-			logrus.Debugf("Process %d exited with status %d", wPid, exitStatus)
-			if wPid == tracer.cmd.Process.Pid {
-				logrus.Debugf("Exiting... (%d)", exitStatus)
-				os.Exit(exitStatus)
-			}
-			if err := unix.PtraceDetach(wPid); err != nil {
-				logrus.Debugf("ptrace_detach: %v", err)
-			}
-			delete(scMap, wPid)
-			continue
-		case ws.Stopped():
-			sig := ws.StopSignal()
-			switch sig {
-			// magic value 0x80: see ptrace(2), O_TRACESYSGOOD
-			case 0x80 | unix.SIGTRAP:
-				if err = unix.PtraceGetRegs(wPid, &sc.Regs.PtraceRegs); err != nil {
-					return fmt.Errorf("failed to read registers for %d: %w", wPid, err)
+		default:
+			switch {
+			case ws.Exited():
+				exitStatus := ws.ExitStatus()
+				logrus.Debugf("Process %d exited with status %d", wPid, exitStatus)
+				if wPid == tracer.cmd.Process.Pid {
+					logrus.Debugf("Exiting... (%d)", exitStatus)
+					os.Exit(exitStatus)
 				}
-				sc.Entry = !sc.Entry
-				if sc.Entry {
-					sc.Num = sc.Regs.Syscall()
+				if err := unix.PtraceDetach(wPid); err != nil {
+					logrus.Debugf("ptrace_detach: %v", err)
 				}
-				if err := tracer.personality.HandleSyscall(sc); err != nil {
-					return err
+				delete(scMap, wPid)
+				continue
+			case ws.Stopped():
+				sig := ws.StopSignal()
+				switch sig {
+				// magic value 0x80: see ptrace(2), O_TRACESYSGOOD
+				case 0x80 | unix.SIGTRAP:
+					if err = unix.PtraceGetRegs(wPid, &sc.Regs.PtraceRegs); err != nil {
+						return fmt.Errorf("failed to read registers for %d: %w", wPid, err)
+					}
+					sc.Entry = !sc.Entry
+					if sc.Entry {
+						sc.Num = sc.Regs.Syscall()
+						sc.OldRegs = sc.Regs
+					}
+					if err := tracer.personality.HandleSyscall(sc); err != nil {
+						return err
+					}
+					if err = unix.PtraceSetRegs(sc.Pid, &sc.Regs.PtraceRegs); err != nil {
+						return fmt.Errorf("failed to set regs %s: %w", sc.Regs.String(), err)
+					}
+				case unix.SIGTRAP:
+					logrus.Debugf("Got real SIGTRAP from %d - program is in trouble.", wPid)
+					val, _ := os.LookupEnv("LSF_SIGTRAP_GDB")
+					if val == "1" {
+						logrus.Debugf("LSF_SIGTRAP_GDB set - Handing off to gdb")
+						err = unix.PtraceSyscall(wPid, int(unix.SIGSTOP))
+						if err != nil {
+							return err
+						}
+						err = unix.PtraceDetach(wPid)
+						if err != nil {
+							return err
+						}
+						binary, err := exec.LookPath("gdb")
+						if err != nil {
+							return err
+						}
+						args := []string{"gdb", "-ex", "set osabi none", "-ex", fmt.Sprintf("attach %d", wPid)}
+						env := os.Environ()
+						panic(syscall.Exec(binary, args, env))
+					}
+				case unix.SIGSEGV, unix.SIGABRT, unix.SIGILL:
+					if getRegErr := unix.PtraceGetRegs(wPid, &sc.Regs.PtraceRegs); getRegErr == nil {
+						return fmt.Errorf("got signal %v PC=0x%x (regs: %s)", sig, sc.Regs.PC(), sc.Regs.String())
+					}
+					return fmt.Errorf("got signal %v (regs: N/A)", sig)
+				default:
+					logrus.Debugf("ignoring SIGSTOP (ws=%+v (0x%x))", ws, ws)
 				}
-				if err = unix.PtraceSetRegs(sc.Pid, &sc.Regs.PtraceRegs); err != nil {
-					return fmt.Errorf("failed to set regs %s: %w", sc.Regs.String(), err)
-				}
-			case unix.SIGTRAP:
-				logrus.Debugf("ignoring signal %v (SIGTRAP) without mask 0x80", unix.SIGTRAP)
-			case unix.SIGSEGV, unix.SIGABRT, unix.SIGILL:
-				if getRegErr := unix.PtraceGetRegs(wPid, &sc.Regs.PtraceRegs); getRegErr == nil {
-					return fmt.Errorf("got signal %v PC=0x%x (regs: %s)", sig, sc.Regs.PC(), sc.Regs.String())
-				}
-				return fmt.Errorf("got signal %v (regs: N/A)", sig)
-			default:
-				logrus.Debugf("ignoring SIGSTOP (ws=%+v (0x%x))", ws, ws)
 			}
 		}
 		if err := unix.PtraceSyscall(wPid, 0); err != nil {
 			return fmt.Errorf("failed to call PTRACE_SYSCALL (pid=%d) %w", wPid, err)
 		}
 	}
+}
+
+func AllocScratch(pid int, regs *Regs, size uint64) (uint64, error) {
+	mmapIn := regs.PtraceRegs
+	mmapIn.Rax = unix.SYS_MMAP
+	mmapIn.Rdi = 0
+	mmapIn.Rsi = size
+	mmapIn.Rdx = unix.PROT_READ | unix.PROT_WRITE
+	mmapIn.R10 = unix.MAP_ANON | unix.MAP_PRIVATE
+	mmapIn.R8 = 0xffffffff
+	mmapIn.R9 = 0
+	mmapOut, err := procutil.InjectSyscall(pid, mmapIn)
+	if err != nil {
+		return 0, err
+	}
+	if int64(mmapOut.Rax) < 0 {
+		return 0, fmt.Errorf("Failed to mmap scratch space: %d", mmapOut.Rax)
+	}
+	return mmapOut.Rax, nil
 }

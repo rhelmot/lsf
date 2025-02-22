@@ -11,6 +11,7 @@ import (
 	"github.com/AkihiroSuda/lsf/pkg/tracer"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
+	"github.com/lunixbochs/struc"
 )
 
 func (p *personality) InitNewProc(pid int, regs *tracer.Regs) error {
@@ -161,6 +162,22 @@ func sysarchHandler(sc *tracer.SyscallCtx) error {
 		sc.Regs.SetSyscall(nopSyscall)
 	case false:
 		switch sc.Regs.Arg(0) {
+		case freebsd.AMD64_GET_FSBASE:
+			fsBasePtr := uintptr(sc.Regs.Arg(1))
+			fsBase := make([]byte, 8)
+			binary.LittleEndian.PutUint64(fsBase, sc.Regs.Fs_base)
+			if _, err := unix.PtracePokeData(sc.Pid, fsBasePtr, fsBase); err != nil {
+				return err
+			}
+			sc.Regs.SetRet(0)
+		case freebsd.AMD64_GET_GSBASE:
+			gsBasePtr := uintptr(sc.Regs.Arg(1))
+			gsBase := make([]byte, 8)
+			binary.LittleEndian.PutUint64(gsBase, sc.Regs.Gs_base)
+			if _, err := unix.PtracePokeData(sc.Pid, gsBasePtr, gsBase); err != nil {
+				return err
+			}
+			sc.Regs.SetRet(0)
 		case freebsd.AMD64_SET_FSBASE:
 			fsBasePtr := uintptr(sc.Regs.Arg(1))
 			fsBase := make([]byte, 8)
@@ -169,6 +186,37 @@ func sysarchHandler(sc *tracer.SyscallCtx) error {
 			}
 			sc.Regs.Fs_base = binary.LittleEndian.Uint64(fsBase)
 			sc.Regs.SetRet(0)
+		case freebsd.AMD64_SET_GSBASE:
+			gsBasePtr := uintptr(sc.Regs.Arg(1))
+			gsBase := make([]byte, 8)
+			if _, err := unix.PtracePeekData(sc.Pid, gsBasePtr, gsBase); err != nil {
+				return err
+			}
+			sc.Regs.Gs_base = binary.LittleEndian.Uint64(gsBase)
+			sc.Regs.SetRet(0)
+		case freebsd.AMD64_GET_XFPUSTATE:
+			argstructPtr := uintptr(sc.Regs.Arg(1))
+			argstructBuf := make([]byte, 16)
+			if _, err := unix.PtracePeekData(sc.Pid, argstructPtr, argstructBuf); err != nil {
+				return err
+			}
+			//addr := binary.LittleEndian.Uint64(argstructBuf[:8])
+			len := binary.LittleEndian.Uint64(argstructBuf[8:])
+			maxNormie, err := struc.Sizeof(&tracer.SavefpuAmd64{})
+			if err != nil {
+				return err
+			}
+			maxLen := tracer.XsaveSize()
+			// len is actually the "extra size" used for xsave area MINUS the stuff present in ucontext
+			if len > uint64(maxLen) - uint64(maxNormie) {
+				logrus.Debugf("process is trying to use xsave area of size 0x%x", len)
+				ret := -1 * int(freebsd.EINVAL)
+				sc.Regs.SetRet(uint64(ret))
+			} else {
+				// we literally don't have access to the data we need for this...
+				// https://lkml.iu.edu/hypermail/linux/kernel/1002.0/00422.html
+				sc.Regs.SetRet(0)
+			}
 		default:
 			logrus.Debugf("SYS_SYSARCH (%d): unknown arg %d. returning -ENOTSUP", sc.Regs.Arg(0), freebsd.SYS_SYSARCH)
 			ret := -1 * int(freebsd.ENOTSUP)
